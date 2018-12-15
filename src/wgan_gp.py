@@ -40,6 +40,9 @@ class WGAN_GP(object):
         elif self.flags.dataset == 'imagenet64':
             self.gen_c = [4*4*8*64, 512, 256, 128, 64]
             self.dis_c = [64, 128, 256, 512, 512]
+        elif self.flags.dataset == 'lear':
+            self.gen_c = [2*4*512, 512, 512, 256, 128, 64, 32]
+            self.dis_c = [32, 64, 128, 256, 512, 512, 512]
         else:
             raise NotImplementedError
 
@@ -61,6 +64,9 @@ class WGAN_GP(object):
         if self.flags.dataset == 'imagenet64':
             self.generator = self.resnetGenerator
             self.discriminator = self.resnetDiscriminator
+        elif self.flags.dataset == 'lear':
+            self.generator = self.learGenerator
+            self.discriminator = self.learDiscriminator
         else:
             self.generator = self.basicGenerator
             self.discriminator = self.basicDiscriminator
@@ -105,112 +111,71 @@ class WGAN_GP(object):
 
         self.summary_op = tf.summary.merge_all()
 
-    def basicGenerator(self, data, name='g_'):
+
+    def learGenerator(self, data, name='g_'):
         with tf.variable_scope(name):
             data_flatten = flatten(data)
             tf_utils.print_activations(data_flatten)
 
-            # from (N, 128) to (N, 4, 4, 256)
+            # from (N, 128) to (N, 2, 4, 512)
             h0_linear = tf_utils.linear(data_flatten, self.gen_c[0], name='h0_linear')
-            if self.flags.dataset == 'cifar10':
-                h0_linear = tf.reshape(h0_linear, [tf.shape(h0_linear)[0], 4, 4, int(self.gen_c[0] / (4 * 4))])
-                h0_linear = tf_utils.norm(h0_linear, _type='batch', _ops=self.gen_train_ops, name='h0_norm')
-            h0_relu = tf.nn.relu(h0_linear, name='h0_relu')
-            h0_reshape = tf.reshape(h0_relu, [tf.shape(h0_relu)[0], 4, 4, int(self.gen_c[0]/(4*4))])
-
-            # from (N, 4, 4, 256) to (N, 8, 8, 128)
-            h1_deconv = tf_utils.deconv2d(h0_reshape, self.gen_c[1], k_h=5, k_w=5, name='h1_deconv2d')
-            if self.flags.dataset == 'cifar10':
-                h1_deconv = tf_utils.norm(h1_deconv, _type='batch', _ops=self.gen_train_ops, name='h1_norm')
-            h1_relu = tf.nn.relu(h1_deconv, name='h1_relu')
-
-            # from (N, 8, 8, 128) to (N, 16, 16, 64)
-            h2_deconv = tf_utils.deconv2d(h1_relu, self.gen_c[2], k_h=5, k_w=5, name='h2_deconv2d')
-            if self.flags.dataset == 'cifar10':
-                h2_deconv = tf_utils.norm(h2_deconv, _type='batch', _ops=self.gen_train_ops, name='h2_norm')
-            h2_relu = tf.nn.relu(h2_deconv, name='h2_relu')
-
-            # from (N, 16, 16, 64) to (N, 32, 32, 1)
-            output = tf_utils.deconv2d(h2_relu, self.image_size[2], k_h=5, k_w=5, name='h3_deconv2d')
-
-            return tf_utils.tanh(output)
-
-    def basicDiscriminator(self, data, name='d_', is_reuse=False):
-        with tf.variable_scope(name) as scope:
-            if is_reuse is True:
-                scope.reuse_variables()
-            tf_utils.print_activations(data)
-
-            # from (N, 32, 32, 1) to (N, 16, 16, 64)
-            h0_conv = tf_utils.conv2d(data, self.dis_c[0], k_h=5, k_w=5, name='h0_conv2d')
-            h0_lrelu = tf_utils.lrelu(h0_conv, name='h0_lrelu')
-
-            # from (N, 16, 16, 64) to (N, 8, 8, 128)
-            h1_conv = tf_utils.conv2d(h0_lrelu, self.dis_c[1], k_h=5, k_w=5, name='h1_conv2d')
-            h1_lrelu = tf_utils.lrelu(h1_conv, name='h1_lrelu')
-
-            # from (N, 8, 8, 128) to (N, 4, 4, 256)
-            h2_conv = tf_utils.conv2d(h1_lrelu, self.dis_c[2], k_h=5, k_w=5, name='h2_conv2d')
-            h2_lrelu = tf_utils.lrelu(h2_conv, name='h2_lrelu')
-
-            # from (N, 4, 4, 256) to (N, 4096) and to (N, 1)
-            h2_flatten = flatten(h2_lrelu)
-            h3_linear = tf_utils.linear(h2_flatten, 1, name='h3_linear')
-
-            return tf.nn.sigmoid(h3_linear), h3_linear
-
-    def resnetGenerator(self, data, name='g_'):
-        with tf.variable_scope(name):
-            data_flatten = flatten(data)
-            tf_utils.print_activations(data_flatten)
-
-            # from (N, 128) to (N, 4, 4, 512)
-            h0_linear = tf_utils.linear(data_flatten, self.gen_c[0], name='h0_linear')
-            h0_reshape = tf.reshape(h0_linear, [tf.shape(h0_linear)[0], 4, 4, int(self.gen_c[0]/(4*4))])
-
-            # (N, 8, 8, 512)
+            h0_reshape = tf.reshape(h0_linear, [tf.shape(h0_linear)[0], 2, 4, int(self.gen_c[0]/(2*4))])
+            # print('h0 shape is: ', h0_reshape.shape) # N*4*8*512
+            # (N, 4, 8, 512)
             resblock_1 = tf_utils.res_block_v2(h0_reshape, self.gen_c[1], filter_size=3, _ops=self.gen_train_ops,
                                                norm_='batch', resample='up', name='res_block_1')
-            # (N, 16, 16, 256)
+            # (N, 8, 16, 512)
             resblock_2 = tf_utils.res_block_v2(resblock_1, self.gen_c[2], filter_size=3, _ops=self.gen_train_ops,
                                                norm_='batch', resample='up', name='res_block_2')
-            # (N, 32, 32, 128)
+            # (N, 16, 32, 256)
             resblock_3 = tf_utils.res_block_v2(resblock_2, self.gen_c[3], filter_size=3, _ops=self.gen_train_ops,
                                                norm_='batch', resample='up', name='res_block_3')
-            # (N, 64, 64, 64)
+            # (N, 32, 64, 128)
             resblock_4 = tf_utils.res_block_v2(resblock_3, self.gen_c[4], filter_size=3, _ops=self.gen_train_ops,
                                                norm_='batch', resample='up', name='res_block_4')
+            # (N, 64, 128, 64)
+            resblock_5 = tf_utils.res_block_v2(resblock_4, self.gen_c[5], filter_size=3, _ops=self.gen_train_ops,
+                                               norm_='batch', resample='up', name='res_block_5')
+            # (N, 128, 256, 32)
+            resblock_6 = tf_utils.res_block_v2(resblock_5, self.gen_c[6], filter_size=3, _ops=self.gen_train_ops,
+                                               norm_='batch', resample='up', name='res_block_6')
 
-            norm_5 = tf_utils.norm(resblock_4, _type='batch', _ops=self.gen_train_ops, name='norm_5')
-            relu_5 = tf_utils.relu(norm_5, name='relu_5')
-            # (N, 64, 64, 3)
-            output = tf_utils.conv2d(relu_5, output_dim=self.image_size[2], k_w=3, k_h=3, d_h=1, d_w=1, name='output')
+            norm_7 = tf_utils.norm(resblock_6, _type='batch', _ops=self.gen_train_ops, name='norm_7')
+            relu_7 = tf_utils.relu(norm_7, name='relu_7')
+            # (N, 256, 512, 3)
+            output = tf_utils.conv2d(relu_7, output_dim=self.image_size[2], k_w=3, k_h=3, d_h=1, d_w=1, name='output')
 
             return tf_utils.tanh(output)
 
-    def resnetDiscriminator(self, data, name='d_', is_reuse=False):
+    def learDiscriminator(self, data, name='d_', is_reuse=False):
         with tf.variable_scope(name) as scope:
             if is_reuse is True:
                 scope.reuse_variables()
             tf_utils.print_activations(data)
-
-            # (N, 64, 64, 64)
+            # print('data shape is: ', data.shape)
+            # (N, 128, 256, 32)
             conv_0 = tf_utils.conv2d(data, output_dim=self.dis_c[0], k_h=3, k_w=3, d_h=1, d_w=1, name='conv_0')
-            # (N, 32, 32, 128)
+            # (N, 64, 128, 64)
             resblock_1 = tf_utils.res_block_v2(conv_0, self.dis_c[1], filter_size=3, _ops=self.dis_train_ops,
                                                norm_='layer', resample='down', name='res_block_1')
-            # (N, 16, 16, 256)
+            # (N, 32, 64, 128)
             resblock_2 = tf_utils.res_block_v2(resblock_1, self.dis_c[2], filter_size=3, _ops=self.dis_train_ops,
                                                norm_='layer', resample='down', name='res_block_2')
-            # (N, 8, 8, 512)
+            # (N, 16, 32, 256)
             resblock_3 = tf_utils.res_block_v2(resblock_2, self.dis_c[3], filter_size=3, _ops=self.dis_train_ops,
                                                norm_='layer', resample='down', name='res_block_3')
-            # (N, 4, 4, 512)
+            # (N, 8, 16, 512)
             resblock_4 = tf_utils.res_block_v2(resblock_3, self.dis_c[4], filter_size=3, _ops=self.dis_train_ops,
                                                norm_='layer', resample='down', name='res_block_4')
-            # (N, 4*4*512)
-            flatten_5 = flatten(resblock_4)
-            output = tf_utils.linear(flatten_5, 1, name='output')
+            # (N, 4, 8, 512)
+            resblock_5 = tf_utils.res_block_v2(resblock_4, self.dis_c[5], filter_size=3, _ops=self.dis_train_ops,
+                                               norm_='layer', resample='down', name='res_block_5')
+            # (N, 2, 4, 512)
+            resblock_6 = tf_utils.res_block_v2(resblock_5, self.dis_c[6], filter_size=3, _ops=self.dis_train_ops,
+                                               norm_='layer', resample='down', name='res_block_6')
+            # (N, 2*4*512)
+            flatten_7 = flatten(resblock_6)
+            output = tf_utils.linear(flatten_7, 1, name='output')
 
             return tf.nn.sigmoid(output), output
 
@@ -222,6 +187,7 @@ class WGAN_GP(object):
             batch_imgs = self.dataset.train_next_batch(batch_size=self.flags.batch_size)
             dis_feed = {self.z: self.sample_z(num=self.flags.batch_size), self.Y: batch_imgs}
             dis_run = [self.dis_optim, self.wgan_d_loss, self.gp_loss, self.d_loss]
+
             _, wgan_d_loss, gp_loss, d_loss = self.sess.run(dis_run, feed_dict=dis_feed)
 
         # train generator

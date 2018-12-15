@@ -95,7 +95,8 @@ def transform(img):
 
 
 def inverse_transform(img):
-    return (img + 1.) / 2.
+    # return (img + 1.) / 2.
+    return ((img + 1.) / 2) * 255.
 
 
 def preprocess_pair(img_a, img_b, load_size=286, fine_size=256, flip=True, is_test=False):
@@ -148,8 +149,9 @@ def load_image(image_path, which_direction=0, is_gray_scale=True, img_size=(256,
     return img_a, img_b
 
 
-def load_data(image_path, is_gray_scale=False):
+def load_data(image_path, height, width, is_gray_scale=False):
     img = imread(path=image_path, is_gray_scale=is_gray_scale)
+    img = scipy.misc.imresize(img, [height, width]) # added by changzhi luo
     img_trans = transform(img)  # from [0, 255] to [-1., 1.]
 
     if is_gray_scale and (img_trans.ndim == 2):

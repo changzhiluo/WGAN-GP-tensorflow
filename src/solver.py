@@ -9,6 +9,8 @@ import logging
 import numpy as np
 import tensorflow as tf
 from datetime import datetime
+import cv2
+import utils
 
 # noinspection PyPep8Naming
 import plot as plot
@@ -22,10 +24,9 @@ logger.setLevel(logging.INFO)
 
 class Solver(object):
     def __init__(self, flags):
-        run_config = tf.ConfigProto()
-        run_config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=run_config)
-
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction = 1)
+        tf_config = tf.ConfigProto(allow_soft_placement = True, gpu_options = gpu_options)
+        self.sess = tf.Session(config = tf_config)
         self.flags = flags
         self.iter_time = 0
         self.num_examples_IS = 1000
@@ -111,8 +112,7 @@ class Solver(object):
 
         # for iter_time in range(self.flags.iters):
         while self.iter_time < self.flags.iters:
-            # samppling images and save them
-            self.sample(self.iter_time)
+            print('current iter is : ', self.iter_time)
 
             # train_step
             loss, summary = self.model.train_step()
@@ -123,8 +123,11 @@ class Solver(object):
             if self.flags.dataset == 'cifar10':
                 self.get_inception_score(self.iter_time)  # calculate inception score
 
-            # save model
+            # save model at every 'save_freq' iters
             self.save_model(self.iter_time)
+            # sampple images and save them at everu 'sample_freq' iters
+            self.sample_and_save_imgs(self.iter_time)  # sess run here
+
             self.iter_time += 1
 
         self.save_model(self.flags.iters)
@@ -135,12 +138,13 @@ class Solver(object):
         else:
             logger.info(' [!] Load Failed...')
 
-        num_iters = 20
-        for iter_time in range(num_iters):
-            print('iter_time: {}'.format(iter_time))
+        num_iters = 500
+        for ind in range(num_iters):
+            print('iter_time: {}'.format(ind))
 
             imgs = self.model.test_step()
-            self.model.plots(imgs, iter_time, self.test_out_dir)
+            # self.model.plots(imgs, iter_time, self.test_out_dir)
+            self.sample_and_save_imgs(iter_time = ind, istrain = False)  # 每次生成5个
 
     def get_inception_score(self, iter_time):
         if np.mod(iter_time, self.flags.inception_freq) == 0:
@@ -160,10 +164,25 @@ class Solver(object):
             plot.flush(self.log_out_dir)  # write logs
             plot.tick()
 
-    def sample(self, iter_time):
-        if np.mod(iter_time, self.flags.sample_freq) == 0:
-            imgs = self.model.sample_imgs(sample_size=self.flags.sample_batch)
-            self.model.plots(imgs, iter_time, self.sample_out_dir)
+    def sample_and_save_imgs(self, iter_time = 0, istrain = True):
+        if istrain == True:
+            if np.mod(iter_time, self.flags.sample_freq) == 0:
+                imgs = self.model.sample_imgs(sample_size=self.flags.sample_batch)
+                imgs = [utils.inverse_transform(imgs[idx]) for idx in range(len(imgs))] # [(batch_size, height, width, 3)]
+                for i in range(imgs[0].shape[0]):
+                    # print('img shape is: ', imgs[0][i].shape)
+                    imgs[0][i] = imgs[0][i][:, :, [2, 1, 0]]  # rgb to bgr
+                    file_path = self.sample_out_dir + '/sample_{}_{}.jpg'.format(str(iter_time), str(i+1))
+                    cv2.imwrite(file_path, imgs[0][i])
+        else:
+                imgs = self.model.sample_imgs(sample_size=self.flags.sample_batch)
+                imgs = [utils.inverse_transform(imgs[idx]) for idx in range(len(imgs))] # [(batch_size, height, width, 3)]
+                for i in range(imgs[0].shape[0]):
+                    # print('img shape is: ', imgs[0][i].shape)
+                    imgs[0][i] = imgs[0][i][:, :, [2, 1, 0]]  # rgb to bgr
+                    file_path = self.test_out_dir + '/sample_{}_{}.jpg'.format(str(iter_time), str(i+1))
+                    cv2.imwrite(file_path, imgs[0][i])
+            # self.model.plots(imgs, iter_time, self.sample_out_dir)
 
     def save_model(self, iter_time):
         if np.mod(iter_time + 1, self.flags.save_freq) == 0:
